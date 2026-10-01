@@ -1,0 +1,50 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+body{margin:0;background:#fff;font-family:'Noto Sans KR',sans-serif;color:#1A1A1A}
+.wrap{width:1000px;padding:28px 30px;box-sizing:border-box}
+h2{margin:0 0 18px;font-size:22px;color:#1E3A5F}
+.row{display:flex;align-items:stretch;gap:14px}
+.col{flex:1;display:flex;flex-direction:column;gap:10px}
+.box{border:2px solid #1E3A5F;border-radius:10px;padding:10px 14px;font-size:16px;line-height:1.45;background:#fff}
+.box b{color:#1E3A5F}
+.trig{background:#1E3A5F;color:#fff;border-color:#1E3A5F}.trig b{color:#fff}
+.q{background:#EAF2F8;border-color:#0F5C8C}
+.stop{background:#F4F4F5;border-color:#9CA3AF;color:#6B7280;font-size:14px}
+.ok{background:#EAF6EE;border-color:#15803D}
+.err{background:#FBEAEA;border-color:#B32020}
+.arrow{text-align:center;color:#0F5C8C;font-size:14.5px;line-height:1;margin:-4px 0}
+.side{display:flex;gap:10px;align-items:center}
+.side .box{flex:1}
+.no{font-size:13px;color:#6B7280;width:70px;text-align:center}
+.files{display:flex;gap:8px;margin-top:6px}
+.f{flex:1;border:1.5px dashed #0F5C8C;border-radius:8px;padding:6px 8px;font-size:13.5px;text-align:center;background:#fff}
+.title2{font-size:15px;color:#0F5C8C;font-weight:700;margin-top:4px}
+</style></head><body><div class="wrap">
+<h2>정기 메일 발송기 동작 흐름</h2>
+<div class="row">
+<div class="col" style="flex:1.35">
+  <div class="box trig"><b>⏰ Apps Script 시간 기반 트리거</b><br>1시간마다 runScheduledMails 실행</div>
+  <div class="arrow">▼ MAIL_JOBS 의 메일을 하나씩 검사</div>
+  <div class="side"><div class="box q">① 오늘이 발송일인가?<br><span style="font-size:13.5px">enabled · startDate~endDate · schedule</span></div><div class="no">아니오 →<br>건너뜀</div></div>
+  <div class="arrow">▼ 예</div>
+  <div class="side"><div class="box q">② 지금 시각 ≥ schedule.hour ?</div><div class="no">아니오 →<br>다음 시간에</div></div>
+  <div class="arrow">▼ 예</div>
+  <div class="side"><div class="box q">③ 오늘 이미 보냈나? (lastSent)</div><div class="no">예 →<br>건너뜀</div></div>
+  <div class="arrow">▼ 아니오</div>
+  <div class="side"><div class="box q">④ links 에 빈 칸이 있나?</div><div class="no" style="color:#B32020">예 →<br>오류 알림</div></div>
+  <div class="arrow">▼ 없음</div>
+  <div class="box ok"><b>⑤ 본문 조립 → 발송 → 오늘 날짜 기록</b></div>
+</div>
+<div class="col" style="flex:1">
+  <div class="box"><b>⑤ 본문 조립 자세히</b>
+    <div class="title2">재료</div>
+    <div class="files"><div class="f">Config.gs<br>제목·수신자·링크</div><div class="f">mail_xxx.html<br>메일별 본문</div></div>
+    <div class="arrow" style="margin:6px 0">▼ include(템플릿, 값)</div>
+    <div class="f" style="background:#EAF2F8">본문 HTML 완성<br>(날짜·링크가 채워짐)</div>
+    <div class="arrow" style="margin:6px 0">▼ layout.html 로 감싸기</div>
+    <div class="files"><div class="f">글꼴·수신/참조 표시</div><div class="f">signature.html<br>공통 서명</div></div>
+    <div class="arrow" style="margin:6px 0">▼</div>
+    <div class="f" style="background:#EAF6EE;border-style:solid;border-color:#15803D">GmailApp.sendEmail<br>HTML 본문 + 텍스트 본문</div>
+  </div>
+  <div class="box err" style="font-size:14px"><b style="color:#B32020">오류가 나면</b><br>다른 메일은 계속 보내고, 마지막에 오류를 던져<br>Apps Script 가 <b style="color:#B32020">실패 알림 메일</b>을 보냄</div>
+</div>
+</div></div></body></html>
