@@ -18,8 +18,8 @@ var URGENCY_RULES = [
 ];
 var URGENCY_DEFAULT = "일반";
 
-// 💡 G열(Summary) =AI() 프롬프트
-var SUMMARY_PROMPT = "메일의 제목과 내용을 보고 2문장으로 요약해 줘";
+// 💡 G열(Summary) =AI() 프롬프트 (수식에서 K열 셀 뒤에 & 로 이어 붙임)
+var SUMMARY_PROMPT = "는 메일의 제목과 본문 일부를 추출한 텍스트인데 '음슴체' 2문장으로 요약해 줘";
 
 /**
  * [메뉴 생성 함수]
@@ -279,7 +279,7 @@ function applyAiFormulas_(sheet) {
   for (var i = 0; i < n; i++) {
     if (formulas[i][0] === "" && values[i][0] === "" && fullContents[i][0] !== "") {
       var row = i + 2;
-      sheet.getRange(row, COL.SUMMARY).setFormula('=AI("' + SUMMARY_PROMPT + '", ' + fullColLetter + row + ')');
+      sheet.getRange(row, COL.SUMMARY).setFormula('=AI(' + fullColLetter + row + ' & "' + SUMMARY_PROMPT + '")');
       count++;
     }
   }
