@@ -1,0 +1,17 @@
+<? /* [공통 레이아웃] 모든 메일의 글꼴 / 수신·참조 표시 / 서명을 여기서 한 번에 관리 */ ?>
+<div style="font-family: 'Malgun Gothic', '맑은 고딕', sans-serif; font-size: 14px; color: #000; line-height: 1.6;">
+<? var hasTo = job.displayTo && job.displayTo.length; ?>
+<? var hasCc = job.displayCc && job.displayCc.length; ?>
+<? if (hasTo) { ?>
+  수신: <br><?= job.displayTo.join(', ') ?><br>
+<? } ?>
+<? if (hasCc) { ?>
+  참조: <br><?= job.displayCc.join(', ') ?><br>
+<? } ?>
+<? if (hasTo || hasCc) { ?>
+  <br><br>
+<? } ?>
+<?!= content ?>
+  <br>
+<?!= include('signature', { sender: sender }) ?>
+</div>

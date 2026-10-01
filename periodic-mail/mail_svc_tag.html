@@ -1,0 +1,26 @@
+<? /* [본문] 정비문서 관리 - 부품수리 SVC Tag 사본, 하드카피 수행본
+     사용 가능 값: vars.date(YYMMDD), vars.today, links.attach1, links.attach2
+     링크 작성: 출력 스크립틀릿 안에서 linkHtml(links.xxx, '표시 문구') 호출
+     (주석은 이렇게 스크립틀릿 주석으로 작성 → 메일 원본에 포함되지 않음) */ ?>
+정비문서 관리 지침에 따라 아래와 같이 요청 드리오니, 적의 조치하여 주시기 바랍니다.<br><br>
+
+<strong>1. 부품수리 SVC Tag 사본 보관</strong><br>
+<div style="margin-left: 20px;">
+  가. 근거: KALMOI 25101 PART TAG 기록 및 처리<br>
+  나. 보관 방법: 해당 ERP W/O에 스캔본 첨부 또는 PUSMHP 담당에게 제출<br>
+  <div style="margin-left: 20px;">
+    - 3.2.1.2 수리 PART의 원본 SERVICEABLE TAG는 PART와 함께 저장을 위해<br>
+    정비자재부로 반납하고, 사본 SERVICEABLE TAG는 해당 SHOP W/O에 첨부 후 최소 2년간 보관한다.<br>
+  </div>
+  다. 요청사항: 첨부1 &gt; "요청일" Sheet (ex. <?= vars.date ?>) 에서 조치가 필요한 W/O 확인 &gt; A열 업데이트
+</div><br>
+
+<strong>2. 하드카피 수행본 보관</strong><br>
+<div style="margin-left: 20px;">
+  가. 근거: 하드카피로 수행한 W/O는 하드카피가 원본 정비문서이므로 보존 필요<br>
+  나. 보관 방법: 해당 ERP W/O에 스캔본 첨부하고, 원본은 부서 자체 보관 또는 PUSMHP 담당에게 제출<br>
+  다. 요청사항: 첨부2 &gt; "요청일" Sheet (ex. <?= vars.date ?>) 에서 조치가 필요한 W/O 확인 &gt; A열 업데이트
+</div><br>
+
+첨부1. 부품수리 SVC Tag 사본 보관_PUSMH (<?!= linkHtml(links.attach1, '링크') ?>)<br>
+첨부2. 하드카피 수행본 보관_PUSMH (<?!= linkHtml(links.attach2, '링크') ?>)<br>
