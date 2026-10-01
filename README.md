@@ -7,22 +7,19 @@
 |---|---|---|
 | A~E | Date, Sender, Recipient, Labels, Subject | 값 |
 | F | Urgency | 스크립트에서 정규식으로 분류한 **값** (수식 없음) |
-| G | Summary | Gemini API 일괄 요약 **값** / 실패 시 `=AI()` 수식 → 나중에 값으로 고정 |
+| G | Summary | 정렬 후 `=AI("메일의 제목과 내용을 보고 2문장으로 요약해 줘", K행)` 입력 → 결과가 나오면 **값으로 고정** |
 | H | Snippet | 값 |
 | I | Note | (직접 입력) |
 | J | Thread ID | 값 |
 | K | Full Content | `Subject: …` + 줄바꿈 + `Snippet: …` **값** |
 
-## 최초 설정
-1. Google AI Studio(https://aistudio.google.com/apikey)에서 API 키 발급
-2. 시트 메뉴 **Email Tools → Set Gemini API Key** 에서 키 입력 (스크립트 속성 `GEMINI_API_KEY` 에 저장)
-3. 첫 실행 시 외부 요청(UrlFetchApp) 권한 재승인
-4. 기존 F2의 `=MAP(...)` 수식은 첫 실행 때 자동으로 제거되고 기존 행의 긴급도는 값으로 채워집니다.
-
-모델을 바꾸려면 스크립트 속성 `GEMINI_MODEL` 을 추가하세요. (기본값 `gemini-2.5-flash-lite`)
+## 동작 방식
+- 스크립트는 `=AI()` 수식을 **입력만 하고 바로 종료**합니다. 요약 생성은 시트에서 비동기로 진행되므로 스크립트 실행 시간에 포함되지 않습니다.
+- 다음 `Get Emails` 실행 시작 시(정렬 전에) 결과가 나온 `=AI()` 셀을 값으로 고정합니다.
+- 마지막 실행 후에는 **Freeze AI() Summaries to Values** 메뉴로 남은 수식을 값으로 고정하세요.
+- 기존 F2의 `=MAP(...)` 수식은 첫 실행 때 자동으로 제거되고 기존 행의 긴급도는 값으로 채워집니다.
 
 ## 메뉴
 - **Get Emails (Popup)**: 기간 입력 → 최대 50개 수집·분류·요약 → 보관(Archive) → 정렬
 - **Freeze AI() Summaries to Values**: G열의 `=AI()` 수식 중 결과가 나온 셀을 값으로 고정 (Get Emails 실행 시에도 자동 수행)
-- **Set Gemini API Key**: API 키 저장/삭제
 - **Clear Emails Contents**: 헤더 제외 A~K열 내용 삭제

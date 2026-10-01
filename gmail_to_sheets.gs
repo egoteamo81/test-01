@@ -18,10 +18,8 @@ var URGENCY_RULES = [
 ];
 var URGENCY_DEFAULT = "일반";
 
-// 💡 G열(Summary) 요약 설정
+// 💡 G열(Summary) =AI() 프롬프트
 var SUMMARY_PROMPT = "메일의 제목과 내용을 보고 2문장으로 요약해 줘";
-var GEMINI_MODEL_DEFAULT = 'gemini-2.5-flash-lite'; // 스크립트 속성 GEMINI_MODEL 로 변경 가능
-var GEMINI_BATCH_SIZE = 25;                          // 요청 1건에 담을 메일 수 (요청들은 병렬 전송)
 
 /**
  * [메뉴 생성 함수]
@@ -31,14 +29,13 @@ function onOpen() {
   ui.createMenu('Email Tools')
       .addItem('Get Emails (Popup)', 'fetchUnreadEmails')
       .addItem('Freeze AI() Summaries to Values', 'freezeAiSummaries')
-      .addItem('Set Gemini API Key', 'setGeminiApiKey')
       .addSeparator()
       .addItem('Clear Emails Contents', 'clearSpecificFormats')
       .addToUi();
 }
 
 /**
- * [이메일 수집 메인 함수] - ⚡초고속 50개씩 끊어치기 튜닝 버전 + 긴급도 분류(값) + Gemini 일괄 요약⚡
+ * [이메일 수집 메인 함수] - ⚡초고속 50개씩 끊어치기 튜닝 버전 + 긴급도 분류(값) + AI() 요약⚡
  */
 function fetchUnreadEmails() {
   var ui = SpreadsheetApp.getUi();
@@ -145,7 +142,6 @@ function fetchUnreadEmails() {
 
   // --- STEP 6: A~K열 전체 행 데이터 + 서식 준비 (수식 없이 값으로) ---
   var rows = [];          // A~K열 값
-  var fullContents = [];  // Gemini 요약 입력 (K열과 동일)
   var weights = [];
   var styles = [];
   var colors = [];
@@ -155,7 +151,6 @@ function fetchUnreadEmails() {
       // 💡 K열: 기존 CONCATENATE(E$1,": ",E,char(10),H$1,": ",H) 수식의 결과를 값으로 직접 생성
       var fullContent = HEADERS[COL.SUBJECT - 1] + ": " + msg.subject + "\n" +
                         HEADERS[COL.SNIPPET - 1] + ": " + msg.snippet;
-      fullContents.push(fullContent);
 
       rows.push([
         msg.date,
@@ -164,7 +159,7 @@ function fetchUnreadEmails() {
         safeText_(msg.labels),
         safeText_(msg.subject),
         classifyUrgency(msg.subject, msg.snippet), // 💡 F열: 정규식 분류 결과를 값으로
-        "",                                        // G열: 아래 STEP 7에서 채움
+        "",                                        // G열: 정렬 후 STEP 10에서 =AI() 수식 입력
         safeText_(msg.snippet),
         "",
         msg.threadId,
@@ -178,17 +173,7 @@ function fetchUnreadEmails() {
     });
   });
 
-  // --- STEP 7: G열(Summary) Gemini API 일괄 요약 (메일 25개당 요청 1건, 병렬 전송) ---
-  var summaryResult = summarizeWithGemini_(fullContents);
-  var apiSummarized = 0;
-  summaryResult.summaries.forEach(function(summary, idx) {
-    if (summary) {
-      rows[idx][COL.SUMMARY - 1] = safeText_(summary);
-      apiSummarized++;
-    }
-  });
-
-  // --- STEP 8: 스프레드시트에 한 번에 쓰기 ---
+  // --- STEP 7: 스프레드시트에 한 번에 쓰기 ---
   var startRow = getLastDataRow(sheet, 1) + 1;
   var numRows = rows.length;
   var dataRange = sheet.getRange(startRow, 1, numRows, NUM_COLS);
@@ -199,13 +184,13 @@ function fetchUnreadEmails() {
   dataRange.setFontColors(colors);
   sheet.getRange(startRow, COL.DATE, numRows, 1).setNumberFormat("yyyy-mm-dd hh:mm:ss");
 
-  // --- STEP 9: Gmail 후처리 (보관) ---
+  // --- STEP 8: Gmail 후처리 (보관) ---
   var batchSize = 100;
   for (var k = 0; k < threadsToArchive.length; k += batchSize) {
     GmailApp.moveThreadsToArchive(threadsToArchive.slice(k, k + batchSize));
   }
 
-  // --- STEP 10: 데이터 자동 정렬 (Thread ID 오름차순 -> Date 오름차순) ---
+  // --- STEP 9: 데이터 자동 정렬 (Thread ID 오름차순 -> Date 오름차순) ---
   var finalDataRow = getLastDataRow(sheet, 1);
   if (finalDataRow > 1) {
     sheet.getRange(2, 1, finalDataRow - 1, NUM_COLS).sort([
@@ -214,22 +199,18 @@ function fetchUnreadEmails() {
     ]);
   }
 
-  // --- STEP 11: API 요약이 비어 있는 행만 =AI() 수식으로 대체 (정렬 후에 넣어 행 참조가 꼬이지 않게) ---
-  var fallbackCount = applyAiFormulaFallback_(sheet);
+  // --- STEP 10: G열(Summary)이 빈 행에 =AI() 수식 입력 ---
+  // 💡 정렬이 끝난 뒤에 넣어야 수식의 행 참조(K열)가 정렬로 꼬이지 않음
+  //    수식 입력만 하고 바로 종료 → AI 생성은 시트에서 비동기로 진행되므로 스크립트 실행 시간에 포함되지 않음
+  var aiFormulaCount = applyAiFormulas_(sheet);
 
   var message = "작업 완료! " + numRows + "개의 메일을 처리했습니다.\n" +
                 "같은 메일 그룹끼리 일시에 따라 자동으로 정렬되었습니다.\n\n" +
-                "• Gemini API 요약: " + apiSummarized + "건\n";
-  if (fallbackCount > 0) {
-    message += "• =AI() 수식으로 대체: " + fallbackCount + "건 (결과가 나오면 다음 실행 때 또는 " +
-               "'Freeze AI() Summaries to Values' 메뉴로 값 고정)\n";
+                "• =AI() 요약 수식 입력: " + aiFormulaCount + "건\n";
+  if (freezeResult.frozen > 0 || freezeResult.pending > 0) {
+    message += "• 이전 실행분 값 고정: " + freezeResult.frozen + "건 (아직 생성 중/오류: " + freezeResult.pending + "건)\n";
   }
-  if (freezeResult.frozen > 0) {
-    message += "• 이전 =AI() 결과 값 고정: " + freezeResult.frozen + "건\n";
-  }
-  if (summaryResult.error) {
-    message += "\n⚠️ Gemini API: " + summaryResult.error;
-  }
+  message += "\n요약 생성이 끝나면 다음 실행 때 자동으로, 또는 'Freeze AI() Summaries to Values' 메뉴로 값으로 고정됩니다.";
   ui.alert(message);
 }
 
@@ -279,101 +260,11 @@ function fillMissingUrgency_(sheet) {
 }
 
 /**
- * [Gemini API 일괄 요약]
- * 메일 여러 개를 요청 1건에 묶고(JSON 응답), 요청들은 UrlFetchApp.fetchAll 로 병렬 전송
- * @return {{summaries: string[], error: string}} summaries[i] 는 실패 시 ""
- */
-function summarizeWithGemini_(contents) {
-  var summaries = contents.map(function() { return ""; });
-  if (contents.length === 0) return { summaries: summaries, error: "" };
-
-  var props = PropertiesService.getScriptProperties();
-  var apiKey = props.getProperty('GEMINI_API_KEY');
-  if (!apiKey) {
-    return { summaries: summaries, error: "API 키가 없어 =AI() 수식으로 대체했습니다. ('Set Gemini API Key' 메뉴에서 설정)" };
-  }
-  var model = props.getProperty('GEMINI_MODEL') || GEMINI_MODEL_DEFAULT;
-  var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent';
-
-  var systemText =
-    "너는 업무 메일 요약 도우미야. 입력으로 [번호]가 붙은 여러 통의 메일(Subject, Snippet)이 주어진다.\n" +
-    "각 메일을 서로 독립적으로, 다음 지시에 따라 한국어로 요약해: \"" + SUMMARY_PROMPT + "\"\n" +
-    "입력의 번호를 id 로 그대로 사용하고, 모든 메일에 대해 빠짐없이 결과를 반환해.";
-
-  var requests = [];
-  for (var s = 0; s < contents.length; s += GEMINI_BATCH_SIZE) {
-    var userText = contents.slice(s, s + GEMINI_BATCH_SIZE).map(function(content, k) {
-      return "[" + (s + k) + "]\n" + content;
-    }).join("\n\n");
-
-    var payload = {
-      systemInstruction: { parts: [{ text: systemText }] },
-      contents: [{ role: "user", parts: [{ text: userText }] }],
-      generationConfig: {
-        temperature: 0.2,
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: "ARRAY",
-          items: {
-            type: "OBJECT",
-            properties: {
-              id: { type: "INTEGER" },
-              summary: { type: "STRING" }
-            },
-            required: ["id", "summary"]
-          }
-        }
-      }
-    };
-
-    requests.push({
-      url: url,
-      method: 'post',
-      contentType: 'application/json',
-      headers: { 'x-goog-api-key': apiKey },
-      payload: JSON.stringify(payload),
-      muteHttpExceptions: true
-    });
-  }
-
-  var errors = [];
-  var responses;
-  try {
-    responses = UrlFetchApp.fetchAll(requests);
-  } catch (e) {
-    return { summaries: summaries, error: "요청 실패 (" + e.message + ") → =AI() 수식으로 대체했습니다." };
-  }
-
-  responses.forEach(function(res) {
-    var code = res.getResponseCode();
-    if (code !== 200) {
-      errors.push("HTTP " + code + " " + res.getContentText().substring(0, 200));
-      return;
-    }
-    try {
-      var body = JSON.parse(res.getContentText());
-      var text = body.candidates[0].content.parts.map(function(p) { return p.text || ""; }).join("");
-      JSON.parse(text).forEach(function(item) {
-        if (item && typeof item.id === "number" && item.id >= 0 && item.id < summaries.length && item.summary) {
-          summaries[item.id] = String(item.summary).trim();
-        }
-      });
-    } catch (e) {
-      errors.push("응답 해석 실패 (" + e.message + ")");
-    }
-  });
-
-  if (errors.length > 0) console.warn("Gemini API errors: " + errors.join(" | "));
-  var error = errors.length > 0 ? errors[0] + " → 실패한 행은 =AI() 수식으로 대체했습니다." : "";
-  return { summaries: summaries, error: error };
-}
-
-/**
- * [=AI() 수식 대체]
+ * [=AI() 수식 입력]
  * G열(Summary)이 비어 있고 K열(Full Content)이 있는 행에만 =AI() 수식을 넣음
  * @return {number} 수식을 넣은 행 수
  */
-function applyAiFormulaFallback_(sheet) {
+function applyAiFormulas_(sheet) {
   var lastRow = getLastDataRow(sheet, 1);
   if (lastRow <= 1) return 0;
   var n = lastRow - 1;
@@ -431,29 +322,6 @@ function isAiResultReady_(value) {
   if (value.charAt(0) === "#") return false;               // #ERROR!, #N/A, #NAME? 등
   if (/^(loading|generating)/i.test(value)) return false;  // 생성 중 표시
   return true;
-}
-
-/**
- * [Gemini API 키 설정] 스크립트 속성 GEMINI_API_KEY 에 저장
- */
-function setGeminiApiKey() {
-  var ui = SpreadsheetApp.getUi();
-  var response = ui.prompt(
-    'Gemini API 키 설정',
-    'Google AI Studio(https://aistudio.google.com/apikey)에서 발급한 API 키를 입력하세요.\n(비워 두고 OK를 누르면 키가 삭제됩니다)',
-    ui.ButtonSet.OK_CANCEL
-  );
-  if (response.getSelectedButton() != ui.Button.OK) return;
-
-  var key = response.getResponseText().trim();
-  var props = PropertiesService.getScriptProperties();
-  if (key) {
-    props.setProperty('GEMINI_API_KEY', key);
-    ui.alert("API 키가 저장되었습니다.");
-  } else {
-    props.deleteProperty('GEMINI_API_KEY');
-    ui.alert("API 키가 삭제되었습니다. 요약은 =AI() 수식으로 대체됩니다.");
-  }
 }
 
 /**
