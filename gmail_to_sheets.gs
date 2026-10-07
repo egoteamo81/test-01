@@ -11,12 +11,16 @@ var COL = {
 };
 
 // 💡 F열(Urgency) 분류 규칙: 제목·본문·라벨(D열)을 합친 글자에서 검사 (위에서부터 먼저 매칭되는 것 적용)
+//    background / fontColor: G열(Summary)에만 적용되는 조건부 서식 색 (null 이면 서식 없음)
 var URGENCY_RULES = [
-  { pattern: /URGENT|긴급|AOG|결함|CANCELLED|중요/i, label: "🔴 긴급" },
-  { pattern: /요청|의뢰|문의|지연|Recovery/i,        label: "🟡 요청/확인" },
-  { pattern: /공지|부고|결혼|축하|보고/i,             label: "⚪ 단순공지" }
+  { pattern: /URGENT|긴급|AOG|결함|CANCELLED|중요/i, label: "🔴 긴급",      background: "#f4cccc", fontColor: "#990000" },
+  { pattern: /요청|의뢰|문의|지연|Recovery/i,        label: "🟡 요청/확인", background: "#fff2cc", fontColor: null },
+  { pattern: /공지|부고|결혼|축하|보고/i,             label: "⚪ 단순공지",  background: "#cfe2f3", fontColor: null }
 ];
 var URGENCY_DEFAULT = "일반";
+
+// 💡 Thread ID 묶음별 교차 색상 (A~K열): 회색 ↔ 색 없음
+var THREAD_BAND_COLOR = "#d9d9d9";
 
 // 💡 G열(Summary) =AI() 프롬프트 (수식에서 K열 셀 뒤에 & 로 이어 붙임)
 var SUMMARY_PROMPT = "는 메일의 제목과 본문 일부를 추출한 텍스트인데 '음슴체' 2문장으로 요약해 줘";
@@ -29,6 +33,7 @@ function onOpen() {
   ui.createMenu('Email Tools')
       .addItem('Get Emails (Popup)', 'fetchUnreadEmails')
       .addItem('Freeze AI() Summaries to Values', 'freezeAiSummaries')
+      .addItem('Refresh Formatting (Thread 색상 / Urgency 서식)', 'refreshFormatting')
       .addSeparator()
       .addItem('Clear Emails Contents', 'clearSpecificFormats')
       .addToUi();
@@ -199,6 +204,11 @@ function fetchUnreadEmails() {
     ]);
   }
 
+  // --- STEP 9-1: 서식 — Thread ID 묶음별 교차 색상(A~K) + Urgency 조건부 서식(G열만) ---
+  // 💡 정렬로 묶음 경계가 바뀌므로 정렬 직후 전체 행을 다시 칠함
+  applyThreadBanding_(sheet);
+  applyUrgencyFormatting_(sheet);
+
   // --- STEP 10: G열(Summary)이 빈 행에 =AI() 수식 입력 ---
   // 💡 정렬이 끝난 뒤에 넣어야 수식의 행 참조(K열)가 정렬로 꼬이지 않음
   //    수식 입력만 하고 바로 종료 → AI 생성은 시트에서 비동기로 진행되므로 스크립트 실행 시간에 포함되지 않음
@@ -231,6 +241,65 @@ function classifyUrgency(subject, snippet, labels) {
     if (URGENCY_RULES[i].pattern.test(text)) return URGENCY_RULES[i].label;
   }
   return URGENCY_DEFAULT;
+}
+
+/**
+ * [메뉴] 수동으로 정렬·편집한 뒤 서식만 다시 적용
+ */
+function refreshFormatting() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
+  applyThreadBanding_(sheet);
+  applyUrgencyFormatting_(sheet);
+}
+
+/**
+ * [Thread ID 교차 색상]
+ * J열(Thread ID)이 바뀔 때마다 회색(THREAD_BAND_COLOR) ↔ 색 없음 을 번갈아 A~K열에 칠함
+ * (같은 Thread ID 가 연속된 행들이 한 묶음 → 정렬 후에 호출해야 함)
+ */
+function applyThreadBanding_(sheet) {
+  var lastRow = getLastDataRow(sheet, 1);
+  if (lastRow <= 1) return;
+  var n = lastRow - 1;
+
+  var threadIds = sheet.getRange(2, COL.THREAD_ID, n, 1).getValues();
+  var shaded = false;
+  var backgrounds = threadIds.map(function(r, i) {
+    if (i > 0 && String(r[0]) !== String(threadIds[i - 1][0])) shaded = !shaded;
+    return fillRow_(shaded ? THREAD_BAND_COLOR : null);
+  });
+  sheet.getRange(2, 1, n, NUM_COLS).setBackgrounds(backgrounds);
+}
+
+/**
+ * [Urgency 조건부 서식 — G열(Summary)에만]
+ * 1) 기존 조건부 서식 중 Urgency 값(긴급 / 요청/확인 / 단순공지)을 조건으로 쓰는 규칙은 제거
+ *    (예: 예전에 F열이나 A~K 전체에 걸어 둔 규칙 → Thread 교차 색상을 덮어쓰지 않도록)
+ * 2) URGENCY_RULES 의 색으로 G열 규칙을 새로 추가 (F열 값을 기준으로 판단)
+ * 그 밖의 조건부 서식 규칙은 그대로 유지
+ */
+function applyUrgencyFormatting_(sheet) {
+  var keywords = URGENCY_RULES.map(function(r) { return r.label.replace(/^\S+\s+/, ""); }); // 이모지 뺀 글자
+  var rules = sheet.getConditionalFormatRules().filter(function(rule) {
+    var condition = rule.getBooleanCondition();
+    if (!condition) return true;                       // 색상 스케일 등은 유지
+    var criteria = condition.getCriteriaValues().join(" ");
+    return !keywords.some(function(k) { return criteria.indexOf(k) !== -1; });
+  });
+
+  var urgencyCol = columnToLetter_(COL.URGENCY);
+  var summaryCol = columnToLetter_(COL.SUMMARY);
+  var targetRange = sheet.getRange(summaryCol + "2:" + summaryCol);
+  URGENCY_RULES.forEach(function(r) {
+    if (!r.background && !r.fontColor) return;
+    var builder = SpreadsheetApp.newConditionalFormatRule()
+        .whenFormulaSatisfied('=$' + urgencyCol + '2="' + r.label + '"')
+        .setRanges([targetRange]);
+    if (r.background) builder.setBackground(r.background);
+    if (r.fontColor) builder.setFontColor(r.fontColor);
+    rules.push(builder.build());
+  });
+  sheet.setConditionalFormatRules(rules);
 }
 
 /**
