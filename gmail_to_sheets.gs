@@ -237,7 +237,23 @@ function classifyUrgency(subject, snippet, labels) {
  * [메뉴] 수동으로 정렬·편집한 뒤 서식만 다시 적용
  */
 function refreshFormatting() {
-  applyFormatting_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME));
+  var ui = SpreadsheetApp.getUi();
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
+  if (!sheet) {
+    ui.alert("'" + SHEET_NAME + "' 시트를 찾을 수 없습니다. 시트 이름을 확인해 주세요.");
+    return;
+  }
+  try {
+    var result = applyFormatting_(sheet);
+    ui.alert("서식 적용 완료\n\n" +
+             "• 대상 행: " + result.rows + "행 (2행 ~ " + (result.rows + 1) + "행)\n" +
+             "• Thread 묶음: " + result.groups + "개\n" +
+             "• 수신인이 나인 메일: " + result.mine + "행\n" +
+             "• G열 Urgency 조건부 서식 규칙: " + result.rules + "개 (전체 규칙 " + result.totalRules + "개)");
+  } catch (e) {
+    ui.alert("서식 적용 중 오류가 발생했습니다.\n\n" + e.message + "\n\n" + (e.stack || ""));
+    throw e;
+  }
 }
 
 /**
@@ -247,9 +263,10 @@ function refreshFormatting() {
  *  ③ G열만: Urgency 값에 따른 조건부 서식 (배경색만 바꾸므로 ②의 글자 서식은 유지)
  */
 function applyFormatting_(sheet) {
-  applyThreadBanding_(sheet);
-  applyRecipientStyle_(sheet);
-  applyUrgencyFormatting_(sheet);   // 반드시 마지막
+  var banding = applyThreadBanding_(sheet);
+  var mine = applyRecipientStyle_(sheet);
+  var rules = applyUrgencyFormatting_(sheet);   // 반드시 마지막
+  return { rows: banding.rows, groups: banding.groups, mine: mine, rules: rules.added, totalRules: rules.total };
 }
 
 function isMyMail_(recipient) {
@@ -262,13 +279,14 @@ function isMyMail_(recipient) {
  */
 function applyRecipientStyle_(sheet) {
   var lastRow = getLastDataRow(sheet, 1);
-  if (lastRow <= 1) return;
+  if (lastRow <= 1) return 0;
   var n = lastRow - 1;
 
   var recipients = sheet.getRange(2, COL.RECIPIENT, n, 1).getValues();
-  var weights = [], styles = [], colors = [];
+  var weights = [], styles = [], colors = [], mineCount = 0;
   recipients.forEach(function(r) {
     var mine = isMyMail_(r[0]);
+    if (mine) mineCount++;
     weights.push(fillRow_(mine ? "bold" : "normal"));
     styles.push(fillRow_(mine ? "italic" : "normal"));
     colors.push(fillRow_(mine ? "blue" : "black"));
@@ -277,6 +295,7 @@ function applyRecipientStyle_(sheet) {
   range.setFontWeights(weights);
   range.setFontStyles(styles);
   range.setFontColors(colors);
+  return mineCount;
 }
 
 /**
@@ -286,16 +305,17 @@ function applyRecipientStyle_(sheet) {
  */
 function applyThreadBanding_(sheet) {
   var lastRow = getLastDataRow(sheet, 1);
-  if (lastRow <= 1) return;
+  if (lastRow <= 1) return { rows: 0, groups: 0 };
   var n = lastRow - 1;
 
   var threadIds = sheet.getRange(2, COL.THREAD_ID, n, 1).getValues();
-  var shaded = false;
+  var shaded = false, groups = n > 0 ? 1 : 0;
   var backgrounds = threadIds.map(function(r, i) {
-    if (i > 0 && String(r[0]) !== String(threadIds[i - 1][0])) shaded = !shaded;
+    if (i > 0 && String(r[0]) !== String(threadIds[i - 1][0])) { shaded = !shaded; groups++; }
     return fillRow_(shaded ? THREAD_BAND_COLOR : null);
   });
   sheet.getRange(2, 1, n, NUM_COLS).setBackgrounds(backgrounds);
+  return { rows: n, groups: groups };
 }
 
 /**
@@ -317,6 +337,7 @@ function applyUrgencyFormatting_(sheet) {
   var urgencyCol = columnToLetter_(COL.URGENCY);
   var summaryCol = columnToLetter_(COL.SUMMARY);
   var targetRange = sheet.getRange(summaryCol + "2:" + summaryCol);
+  var added = 0;
   URGENCY_RULES.forEach(function(r) {
     if (!r.background) return;
     var builder = SpreadsheetApp.newConditionalFormatRule()
@@ -324,8 +345,10 @@ function applyUrgencyFormatting_(sheet) {
         .setRanges([targetRange]);
     builder.setBackground(r.background);   // 글자색은 지정하지 않음 → 수신인 서식 유지
     rules.push(builder.build());
+    added++;
   });
   sheet.setConditionalFormatRules(rules);
+  return { added: added, total: rules.length };
 }
 
 /**
