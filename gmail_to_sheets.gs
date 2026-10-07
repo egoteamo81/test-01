@@ -20,6 +20,14 @@ var URGENCY_RULES = [
 ];
 var URGENCY_DEFAULT = "일반";
 
+// 💡 G열 조건부 서식 기본 배경색 (URGENCY_RULES 항목에 background 가 없을 때 라벨 글자로 찾아서 사용)
+//    규칙을 직접 고쳐 쓰다가 background 를 빠뜨려도 서식이 사라지지 않도록 하는 안전장치
+var URGENCY_BACKGROUNDS = {
+  "긴급":      "#f4cccc",
+  "요청/확인": "#fff2cc",
+  "단순공지":  "#cfe2f3"
+};
+
 // 💡 Thread ID 묶음별 교차 색상 (A~K열): 회색 ↔ 색 없음
 var THREAD_BAND_COLOR = "#d9d9d9";
 
@@ -249,7 +257,9 @@ function refreshFormatting() {
              "• 대상 행: " + result.rows + "행 (2행 ~ " + (result.rows + 1) + "행)\n" +
              "• Thread 묶음: " + result.groups + "개\n" +
              "• 수신인이 나인 메일: " + result.mine + "행\n" +
-             "• G열 Urgency 조건부 서식 규칙: " + result.rules + "개 (전체 규칙 " + result.totalRules + "개)");
+             "• G열 Urgency 조건부 서식 규칙: " + result.rules + "개 (전체 규칙 " + result.totalRules + "개)" +
+             (result.noColor.length ? "\n\n⚠️ 배경색이 없어 서식을 건너뛴 등급: " + result.noColor.join(", ") +
+                                      "\n(URGENCY_RULES 의 background 또는 URGENCY_BACKGROUNDS 를 확인하세요)" : ""));
   } catch (e) {
     ui.alert("서식 적용 중 오류가 발생했습니다.\n\n" + e.message + "\n\n" + (e.stack || ""));
     throw e;
@@ -266,7 +276,8 @@ function applyFormatting_(sheet) {
   var banding = applyThreadBanding_(sheet);
   var mine = applyRecipientStyle_(sheet);
   var rules = applyUrgencyFormatting_(sheet);   // 반드시 마지막
-  return { rows: banding.rows, groups: banding.groups, mine: mine, rules: rules.added, totalRules: rules.total };
+  return { rows: banding.rows, groups: banding.groups, mine: mine,
+           rules: rules.added, totalRules: rules.total, noColor: rules.noColor };
 }
 
 function isMyMail_(recipient) {
@@ -337,18 +348,19 @@ function applyUrgencyFormatting_(sheet) {
   var urgencyCol = columnToLetter_(COL.URGENCY);
   var summaryCol = columnToLetter_(COL.SUMMARY);
   var targetRange = sheet.getRange(summaryCol + "2:" + summaryCol);
-  var added = 0;
+  var added = 0, noColor = [];
   URGENCY_RULES.forEach(function(r) {
-    if (!r.background) return;
+    var background = r.background || URGENCY_BACKGROUNDS[r.label.replace(/^\S+\s+/, "")];
+    if (!background) { noColor.push(r.label); return; }
     var builder = SpreadsheetApp.newConditionalFormatRule()
         .whenFormulaSatisfied('=$' + urgencyCol + '2="' + r.label + '"')
         .setRanges([targetRange]);
-    builder.setBackground(r.background);   // 글자색은 지정하지 않음 → 수신인 서식 유지
+    builder.setBackground(background);   // 글자색은 지정하지 않음 → 수신인 서식 유지
     rules.push(builder.build());
     added++;
   });
   sheet.setConditionalFormatRules(rules);
-  return { added: added, total: rules.length };
+  return { added: added, total: rules.length, noColor: noColor };
 }
 
 /**
