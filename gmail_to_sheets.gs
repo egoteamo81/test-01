@@ -11,16 +11,20 @@ var COL = {
 };
 
 // 💡 F열(Urgency) 분류 규칙: 제목·본문·라벨(D열)을 합친 글자에서 검사 (위에서부터 먼저 매칭되는 것 적용)
-//    background / fontColor: G열(Summary)에만 적용되는 조건부 서식 색 (null 이면 서식 없음)
+//    background: G열(Summary)에만 적용되는 조건부 서식 배경색 (null 이면 서식 없음)
+//    ※ 글자색은 지정하지 않음 → "수신인이 나인 메일"의 파란 굵은 글씨가 G열에서도 그대로 유지됨
 var URGENCY_RULES = [
-  { pattern: /URGENT|긴급|AOG|결함|CANCELLED|중요/i, label: "🔴 긴급",      background: "#f4cccc", fontColor: "#990000" },
-  { pattern: /요청|의뢰|문의|지연|Recovery/i,        label: "🟡 요청/확인", background: "#fff2cc", fontColor: null },
-  { pattern: /공지|부고|결혼|축하|보고/i,             label: "⚪ 단순공지",  background: "#cfe2f3", fontColor: null }
+  { pattern: /URGENT|긴급|AOG|결함|CANCELLED|중요/i, label: "🔴 긴급",      background: "#f4cccc" },
+  { pattern: /요청|의뢰|문의|지연|Recovery/i,        label: "🟡 요청/확인", background: "#fff2cc" },
+  { pattern: /공지|부고|결혼|축하|보고/i,             label: "⚪ 단순공지",  background: "#cfe2f3" }
 ];
 var URGENCY_DEFAULT = "일반";
 
 // 💡 Thread ID 묶음별 교차 색상 (A~K열): 회색 ↔ 색 없음
 var THREAD_BAND_COLOR = "#d9d9d9";
+
+// 💡 수신인(To)에 이 주소가 있으면 A~K열을 파란색 · 굵게 · 기울임으로 표시
+var MY_ADDRESS = 'thlim@koreanair.com';
 
 // 💡 G열(Summary) =AI() 프롬프트 (수식에서 K열 셀 뒤에 & 로 이어 붙임)
 var SUMMARY_PROMPT = "는 메일의 제목과 본문 일부를 추출한 텍스트인데 '음슴체' 2문장으로 요약해 줘";
@@ -50,7 +54,6 @@ function fetchUnreadEmails() {
   var num_of_mails_in_thread = 1;
   var num_of_maxMails_collected = 50;
   var len_of_mailContents = 400;
-  var recipient_to_be_Bold = 'thlim@koreanair.com';
 
   // --- STEP 1: 날짜 입력 팝업 ---
   var inputDates = ui.prompt(
@@ -145,11 +148,8 @@ function fetchUnreadEmails() {
     return subjectA < subjectB ? -1 : (subjectA > subjectB ? 1 : 0);
   });
 
-  // --- STEP 6: A~K열 전체 행 데이터 + 서식 준비 (수식 없이 값으로) ---
+  // --- STEP 6: A~K열 전체 행 데이터 준비 (수식 없이 값으로, 서식은 마지막 STEP 11에서 일괄 적용) ---
   var rows = [];          // A~K열 값
-  var weights = [];
-  var styles = [];
-  var colors = [];
 
   threadBundles.forEach(function(bundle) {
     bundle.forEach(function(msg) {
@@ -170,11 +170,6 @@ function fetchUnreadEmails() {
         msg.threadId,
         safeText_(fullContent)
       ]);
-
-      var isTarget = msg.recipient.indexOf(recipient_to_be_Bold) !== -1;
-      weights.push(fillRow_(isTarget ? "bold" : "normal"));
-      styles.push(fillRow_(isTarget ? "italic" : "normal"));
-      colors.push(fillRow_(isTarget ? "blue" : "black"));
     });
   });
 
@@ -183,10 +178,6 @@ function fetchUnreadEmails() {
   var numRows = rows.length;
   var dataRange = sheet.getRange(startRow, 1, numRows, NUM_COLS);
   dataRange.setValues(rows);
-  dataRange.setBackground(null);
-  dataRange.setFontWeights(weights);
-  dataRange.setFontStyles(styles);
-  dataRange.setFontColors(colors);
   sheet.getRange(startRow, COL.DATE, numRows, 1).setNumberFormat("yyyy-mm-dd hh:mm:ss");
 
   // --- STEP 8: Gmail 후처리 (보관) ---
@@ -204,15 +195,14 @@ function fetchUnreadEmails() {
     ]);
   }
 
-  // --- STEP 9-1: 서식 — Thread ID 묶음별 교차 색상(A~K) + Urgency 조건부 서식(G열만) ---
-  // 💡 정렬로 묶음 경계가 바뀌므로 정렬 직후 전체 행을 다시 칠함
-  applyThreadBanding_(sheet);
-  applyUrgencyFormatting_(sheet);
-
   // --- STEP 10: G열(Summary)이 빈 행에 =AI() 수식 입력 ---
   // 💡 정렬이 끝난 뒤에 넣어야 수식의 행 참조(K열)가 정렬로 꼬이지 않음
   //    수식 입력만 하고 바로 종료 → AI 생성은 시트에서 비동기로 진행되므로 스크립트 실행 시간에 포함되지 않음
   var aiFormulaCount = applyAiFormulas_(sheet);
+
+  // --- STEP 11 (마지막): 서식 일괄 적용 ---
+  // ① Thread 교차 색상 → ② 수신인 파란 굵은 글씨 → ③ Urgency 조건부 서식(G열) 순서로 덧입힘
+  applyFormatting_(sheet);
 
   var message = "작업 완료! " + numRows + "개의 메일을 처리했습니다.\n" +
                 "같은 메일 그룹끼리 일시에 따라 자동으로 정렬되었습니다.\n\n" +
@@ -247,9 +237,46 @@ function classifyUrgency(subject, snippet, labels) {
  * [메뉴] 수동으로 정렬·편집한 뒤 서식만 다시 적용
  */
 function refreshFormatting() {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
+  applyFormatting_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME));
+}
+
+/**
+ * [서식 일괄 적용] 아래 순서로 겹쳐 입힘 (뒤의 것이 앞의 것 위에 보임)
+ *  ① A~K 배경: Thread ID 묶음별 교차 색상 (#d9d9d9 ↔ 색 없음)
+ *  ② A~K 글자: 수신인이 나인 메일은 파란색 · 굵게 · 기울임, 나머지는 기본
+ *  ③ G열만: Urgency 값에 따른 조건부 서식 (배경색만 바꾸므로 ②의 글자 서식은 유지)
+ */
+function applyFormatting_(sheet) {
   applyThreadBanding_(sheet);
-  applyUrgencyFormatting_(sheet);
+  applyRecipientStyle_(sheet);
+  applyUrgencyFormatting_(sheet);   // 반드시 마지막
+}
+
+function isMyMail_(recipient) {
+  return String(recipient || "").toLowerCase().indexOf(MY_ADDRESS.toLowerCase()) !== -1;
+}
+
+/**
+ * [수신인 글자 서식] C열(Recipient)에 MY_ADDRESS 가 있는 행은 A~K열을 파란색 · 굵게 · 기울임
+ * (정렬·수동 편집 후에도 전체 행 기준으로 다시 맞춤. 배경색은 건드리지 않음)
+ */
+function applyRecipientStyle_(sheet) {
+  var lastRow = getLastDataRow(sheet, 1);
+  if (lastRow <= 1) return;
+  var n = lastRow - 1;
+
+  var recipients = sheet.getRange(2, COL.RECIPIENT, n, 1).getValues();
+  var weights = [], styles = [], colors = [];
+  recipients.forEach(function(r) {
+    var mine = isMyMail_(r[0]);
+    weights.push(fillRow_(mine ? "bold" : "normal"));
+    styles.push(fillRow_(mine ? "italic" : "normal"));
+    colors.push(fillRow_(mine ? "blue" : "black"));
+  });
+  var range = sheet.getRange(2, 1, n, NUM_COLS);
+  range.setFontWeights(weights);
+  range.setFontStyles(styles);
+  range.setFontColors(colors);
 }
 
 /**
@@ -275,7 +302,7 @@ function applyThreadBanding_(sheet) {
  * [Urgency 조건부 서식 — G열(Summary)에만]
  * 1) 기존 조건부 서식 중 Urgency 값(긴급 / 요청/확인 / 단순공지)을 조건으로 쓰는 규칙은 제거
  *    (예: 예전에 F열이나 A~K 전체에 걸어 둔 규칙 → Thread 교차 색상을 덮어쓰지 않도록)
- * 2) URGENCY_RULES 의 색으로 G열 규칙을 새로 추가 (F열 값을 기준으로 판단)
+ * 2) URGENCY_RULES 의 배경색으로 G열 규칙을 새로 추가 (F열 값을 기준으로 판단, 글자색은 건드리지 않음)
  * 그 밖의 조건부 서식 규칙은 그대로 유지
  */
 function applyUrgencyFormatting_(sheet) {
@@ -291,12 +318,11 @@ function applyUrgencyFormatting_(sheet) {
   var summaryCol = columnToLetter_(COL.SUMMARY);
   var targetRange = sheet.getRange(summaryCol + "2:" + summaryCol);
   URGENCY_RULES.forEach(function(r) {
-    if (!r.background && !r.fontColor) return;
+    if (!r.background) return;
     var builder = SpreadsheetApp.newConditionalFormatRule()
         .whenFormulaSatisfied('=$' + urgencyCol + '2="' + r.label + '"')
         .setRanges([targetRange]);
-    if (r.background) builder.setBackground(r.background);
-    if (r.fontColor) builder.setFontColor(r.fontColor);
+    builder.setBackground(r.background);   // 글자색은 지정하지 않음 → 수신인 서식 유지
     rules.push(builder.build());
   });
   sheet.setConditionalFormatRules(rules);
