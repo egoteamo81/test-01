@@ -10,7 +10,7 @@ var COL = {
   SUMMARY: 7, SNIPPET: 8, NOTE: 9, THREAD_ID: 10, FULL: 11
 };
 
-// 💡 F열(Urgency) 분류 규칙: 기존 MAP/REGEXMATCH 수식과 동일한 순서·패턴 (위에서부터 먼저 매칭되는 것 적용)
+// 💡 F열(Urgency) 분류 규칙: 제목·본문·라벨(D열)을 합친 글자에서 검사 (위에서부터 먼저 매칭되는 것 적용)
 var URGENCY_RULES = [
   { pattern: /URGENT|긴급|AOG|결함|CANCELLED|중요/i, label: "🔴 긴급" },
   { pattern: /요청|의뢰|문의|지연|Recovery/i,        label: "🟡 요청/확인" },
@@ -158,7 +158,7 @@ function fetchUnreadEmails() {
         safeText_(msg.recipient),
         safeText_(msg.labels),
         safeText_(msg.subject),
-        classifyUrgency(msg.subject, msg.snippet), // 💡 F열: 정규식 분류 결과를 값으로
+        classifyUrgency(msg.subject, msg.snippet, msg.labels), // 💡 F열: 제목·본문·라벨 정규식 분류 결과를 값으로
         "",                                        // G열: 정렬 후 STEP 10에서 =AI() 수식 입력
         safeText_(msg.snippet),
         "",
@@ -216,12 +216,17 @@ function fetchUnreadEmails() {
 
 /**
  * [긴급도 분류]
- * 기존 F열 수식과 동일: 제목이 비어 있으면 "", 아니면 "제목 + 공백 + 본문"에 대해 규칙을 순서대로 검사
+ * 제목이 비어 있으면 "", 아니면 "제목 + 본문 + 라벨"을 이어 붙인 글자에 대해 규칙을 순서대로 검사
+ * @param {string} subject  E열 Subject
+ * @param {string} snippet  H열 Snippet
+ * @param {string} labels   D열 Labels (예: "업무, 정비문서") — 생략 가능
  */
-function classifyUrgency(subject, snippet) {
+function classifyUrgency(subject, snippet, labels) {
   subject = (subject == null) ? "" : String(subject);
   if (subject === "") return "";
-  var text = subject + " " + (snippet == null ? "" : String(snippet));
+  var text = [subject, snippet, labels]
+      .map(function(v) { return v == null ? "" : String(v); })
+      .join(" ");
   for (var i = 0; i < URGENCY_RULES.length; i++) {
     if (URGENCY_RULES[i].pattern.test(text)) return URGENCY_RULES[i].label;
   }
@@ -231,7 +236,7 @@ function classifyUrgency(subject, snippet) {
 /**
  * [F열 마이그레이션]
  * F열에 수식(예: 기존 MAP 배열 수식)이 남아 있으면 F열 내용을 지우고,
- * 비어 있는 행의 긴급도를 E열(Subject)/H열(Snippet) 기준으로 값으로 채움
+ * 비어 있는 행의 긴급도를 E열(Subject)/H열(Snippet)/D열(Labels) 기준으로 값으로 채움
  */
 function fillMissingUrgency_(sheet) {
   var lastRow = getLastDataRow(sheet, 1);
@@ -247,11 +252,12 @@ function fillMissingUrgency_(sheet) {
   var current = urgencyRange.getValues();
   var subjects = sheet.getRange(2, COL.SUBJECT, n, 1).getValues();
   var snippets = sheet.getRange(2, COL.SNIPPET, n, 1).getValues();
+  var labels = sheet.getRange(2, COL.LABELS, n, 1).getValues();
   var changed = false;
 
   var output = current.map(function(r, i) {
     if (r[0] !== "") return [r[0]];
-    var urgency = classifyUrgency(subjects[i][0], snippets[i][0]);
+    var urgency = classifyUrgency(subjects[i][0], snippets[i][0], labels[i][0]);
     if (urgency !== "") changed = true;
     return [urgency];
   });
