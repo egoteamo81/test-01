@@ -11,8 +11,8 @@ var COL = {
 };
 
 // 💡 F열(Urgency) 분류 규칙: 제목·본문·라벨(D열)을 합친 글자에서 검사 (위에서부터 먼저 매칭되는 것 적용)
-//    background: G열(Summary)에만 적용되는 조건부 서식 배경색 (null 이면 서식 없음)
-//    ※ 글자색은 지정하지 않음 → "수신인이 나인 메일"의 파란 굵은 글씨가 G열에서도 그대로 유지됨
+//    background: G열(Summary)에만 적용되는 조건부 서식 배경색 (없으면 URGENCY_BACKGROUNDS 에서 찾음)
+//    글자 색 · 굵게 는 아래 URGENCY_FONTS 에서 설정
 var URGENCY_RULES = [
   { pattern: /URGENT|긴급|AOG|결함|CANCELLED|중요/i, label: "🔴 긴급",      background: "#f4cccc" },
   { pattern: /요청|의뢰|문의|지연|Recovery/i,        label: "🟡 요청/확인", background: "#fff2cc" },
@@ -26,6 +26,18 @@ var URGENCY_BACKGROUNDS = {
   "긴급":      "#f4cccc",
   "요청/확인": "#fff2cc",
   "단순공지":  "#cfe2f3"
+};
+
+// 💡 G열 조건부 서식 글자 서식 (등급 이름 → { color: 글자색, bold: 굵게 여부 })
+//    color: "#990000" 처럼 지정하면 그 색으로 바꿈 / null 이면 바꾸지 않음
+//           (null 이면 "수신인이 나인 메일"의 파란 글씨가 G열에서도 그대로 보임.
+//            색을 지정하면 그 등급의 G열은 내 메일이라도 지정한 색으로 바뀜)
+//    bold:  true = 굵게 / false = 굵게 해제 / null = 바꾸지 않음 (기존 굵기 유지)
+//    ※ 새 등급을 URGENCY_RULES 에 추가했다면 여기에도 "등급 이름": { ... } 을 추가 (없으면 글자 서식 변경 없음)
+var URGENCY_FONTS = {
+  "긴급":      { color: null, bold: true },
+  "요청/확인": { color: null, bold: null },
+  "단순공지":  { color: null, bold: null }
 };
 
 // 💡 Thread ID 묶음별 교차 색상 (A~K열): 회색 ↔ 색 없음
@@ -258,8 +270,8 @@ function refreshFormatting() {
              "• Thread 묶음: " + result.groups + "개\n" +
              "• 수신인이 나인 메일: " + result.mine + "행\n" +
              "• G열 Urgency 조건부 서식 규칙: " + result.rules + "개 (전체 규칙 " + result.totalRules + "개)" +
-             (result.noColor.length ? "\n\n⚠️ 배경색이 없어 서식을 건너뛴 등급: " + result.noColor.join(", ") +
-                                      "\n(URGENCY_RULES 의 background 또는 URGENCY_BACKGROUNDS 를 확인하세요)" : ""));
+             (result.noColor.length ? "\n\n⚠️ 배경색·글자 서식이 모두 없어 건너뛴 등급: " + result.noColor.join(", ") +
+                                      "\n(URGENCY_BACKGROUNDS / URGENCY_FONTS 에 등급을 추가하세요)" : ""));
   } catch (e) {
     ui.alert("서식 적용 중 오류가 발생했습니다.\n\n" + e.message + "\n\n" + (e.stack || ""));
     throw e;
@@ -350,12 +362,19 @@ function applyUrgencyFormatting_(sheet) {
   var targetRange = sheet.getRange(summaryCol + "2:" + summaryCol);
   var added = 0, noColor = [];
   URGENCY_RULES.forEach(function(r) {
-    var background = r.background || URGENCY_BACKGROUNDS[r.label.replace(/^\S+\s+/, "")];
-    if (!background) { noColor.push(r.label); return; }
+    var key = r.label.replace(/^\S+\s+/, "");           // 이모지 뺀 등급 이름 (예: "긴급")
+    var background = r.background || URGENCY_BACKGROUNDS[key];
+    var font = URGENCY_FONTS[key] || {};
+    var hasColor = font.color != null && font.color !== "";
+    var hasBold = font.bold === true || font.bold === false;
+    if (!background && !hasColor && !hasBold) { noColor.push(r.label); return; }
+
     var builder = SpreadsheetApp.newConditionalFormatRule()
         .whenFormulaSatisfied('=$' + urgencyCol + '2="' + r.label + '"')
         .setRanges([targetRange]);
-    builder.setBackground(background);   // 글자색은 지정하지 않음 → 수신인 서식 유지
+    if (background) builder.setBackground(background);
+    if (hasColor) builder.setFontColor(font.color);      // null 이면 지정 안 함 → 수신인 파란 글씨 유지
+    if (hasBold) builder.setBold(font.bold);
     rules.push(builder.build());
     added++;
   });
