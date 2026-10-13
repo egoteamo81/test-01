@@ -76,15 +76,28 @@ function fetchUnreadEmails() {
   var len_of_mailContents = 400;
 
   // --- STEP 1: 날짜 입력 팝업 ---
+  // 💡 ui.prompt 는 입력칸에 기본값을 미리 채울 수 없으므로, 빈칸으로 OK 를 누르면 기본값(어제 ~ 내일)을 사용
+  var tz = Session.getScriptTimeZone();
+  var fmt = function(offsetDays) {
+    var d = new Date();
+    d.setDate(d.getDate() + offsetDays);
+    return Utilities.formatDate(d, tz, 'yyyy/MM/dd');
+  };
+  var DATE_WORDS = { '어제': fmt(-1), '오늘': fmt(0), '내일': fmt(1) };
+  var defaultInput = DATE_WORDS['어제'] + ' ~ ' + DATE_WORDS['내일'];
+
   var inputDates = ui.prompt(
     '조회 기간 입력',
-    '시작일과 종료일을 물결(~) 또는 쉼표(,)로 구분하여 입력하세요.\n(예: 2024/01/01 ~ 2024/01/02)',
+    '시작일과 종료일을 물결(~) 또는 쉼표(,)로 구분하여 입력하세요.\n' +
+    '(예: 2024/01/01 ~ 2024/01/02, 어제 ~ 내일)\n\n' +
+    '빈칸으로 OK 를 누르면 기본값 [어제 ~ 내일] = ' + defaultInput + ' 로 조회합니다.',
     ui.ButtonSet.OK_CANCEL
   );
   if (inputDates.getSelectedButton() != ui.Button.OK) return;
 
-  var rawInput = inputDates.getResponseText().trim();
-  var dateParts = rawInput.split(/[\~,\s]+/).map(function(s) { return s.trim(); }).filter(Boolean);
+  var rawInput = inputDates.getResponseText().trim() || defaultInput;
+  var dateParts = rawInput.split(/[\~,\s]+/).map(function(s) { return s.trim(); }).filter(Boolean)
+    .map(function(s) { return DATE_WORDS[s] || s; });  // '어제/오늘/내일' → 날짜
 
   if (dateParts.length < 2) {
     ui.alert("시작일과 종료일을 모두 입력해주세요.\n(예: 2024/01/01 ~ 2024/01/02)");
